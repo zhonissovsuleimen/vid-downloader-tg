@@ -1,0 +1,8 @@
+[package]
+name = "vid-downloader-tg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+teloxide = { version = "0.13.0", features = ["macros"] }
+tokio = { version = "1.41.1", features = ["rt-multi-thread", "macros"] }
