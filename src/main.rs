@@ -3,9 +3,24 @@ mod downloader;
 // mod bot_wrapper;
 use downloader::Downloader;
 use teloxide::{prelude::*, types::InputFile};
+use tracing::info;
+use tracing_subscriber::{self, fmt::format::FmtSpan};
 
 #[tokio::main]
 async fn main() {
+  tracing_subscriber::fmt()
+    .compact()
+    .with_ansi(false)
+    .with_file(false)
+    .with_level(true)
+    .with_line_number(false)
+    .with_span_events(FmtSpan::FULL)
+    .with_target(false)
+    .with_thread_ids(true)
+    .with_thread_names(false)
+    .init();
+
+  info!("Starting telegram bot...");
   let bot = Bot::from_env();
 
   teloxide::repl(bot, answer).await;
@@ -13,6 +28,7 @@ async fn main() {
 
 async fn answer(bot: Bot, msg: Message) -> ResponseResult<()> {
   if let Some(input) = msg.text() {
+    info!("Received text message: {input}");
     match input.starts_with('/') {
       true => match input {
         "/platforms" => send_platforms(bot, msg).await?,
@@ -22,6 +38,7 @@ async fn answer(bot: Bot, msg: Message) -> ResponseResult<()> {
         send_video(bot, msg).await?;
       }
     }
+    info!("Handled user message");
   }
   Ok(())
 }

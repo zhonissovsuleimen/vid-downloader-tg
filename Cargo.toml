@@ -13,3 +13,12 @@ m3u8-rs = "6.0.0"
 regex = "1.11.1"
 reqwest = { version = "0.12.9", features = ["blocking"] }
 winapi = { version = "0.3.9", features = ["jobapi2", "winnt", "processthreadsapi", "handleapi"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+opt-level = "z"  # Optimize for size.
+lto = true
+panic = "abort"
