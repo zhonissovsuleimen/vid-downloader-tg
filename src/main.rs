@@ -1,6 +1,6 @@
 mod downloader;
 
-mod bot_wrapper;
+// mod bot_wrapper;
 use downloader::Downloader;
 use teloxide::{prelude::*, types::InputFile};
 
