@@ -16,13 +16,8 @@ use std::{
   sync::{Arc, Mutex},
   time::Duration,
 };
-use tokio::{process::Command, signal};
-
-use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
-use winapi::um::winnt::{JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
-use winapi::um::processthreadsapi::OpenProcess;
-use winapi::um::handleapi::CloseHandle;
-use std::ptr::null_mut;
+use tokio::process::Command;
+use tracing::info;
 
 use super::downloader_error::DownloaderError;
 
@@ -33,17 +28,8 @@ enum Platform {
 
 pub struct Downloader {
   browser: Arc<Browser>,
-  process_id: u32,
 
   request_patterns: Vec<RequestPattern>,
-}
-
-impl Drop for Downloader {
-  fn drop(&mut self) {
-    let _ = Command::new("taskkill")
-      .args(&["/F", "/PID", &self.process_id.to_string()])
-      .output();
-  }
 }
 
 impl Downloader {
@@ -58,8 +44,17 @@ impl Downloader {
     );
     let process_id = browser.get_process_id().unwrap();
 
-    // Assign the browser process to a Job Object
+    //hopefully killing the browser if the terminal is terminated unexpectedly
+    #[cfg(target_os = "windows")]
     unsafe {
+      use std::ptr::null_mut;
+      use winapi::um::handleapi::CloseHandle;
+      use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
+      use winapi::um::processthreadsapi::OpenProcess;
+      use winapi::um::winnt::{
+        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+      };
+
       let h_job = CreateJobObjectW(null_mut(), null_mut());
       let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
         BasicLimitInformation: std::mem::zeroed(),
@@ -82,6 +77,17 @@ impl Downloader {
       // Close the process handle when done
       CloseHandle(process_handle);
     }
+    #[cfg(target_os = "linux")]
+    {
+      tokio::spawn(async move {
+        info!("Waiting for ctrl-c command to kill browser");
+        let _ = signal::ctrl_c().await;
+        info!("Received ctrl-c command, killing browser");
+        {
+          let _ = Command::new("kill").args(&["-9", &process_id.to_string()]).output().await;
+        }
+      });
+    }
 
     let video_pattern = RequestPattern {
       url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
@@ -89,18 +95,8 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    //spawn task that kills the browser when ctr-c command is issued
-    tokio::spawn(async move {
-      let _ = signal::ctrl_c().await;
-      let _ = Command::new("taskkill")
-        .args(&["/F", "/PID", &process_id.to_string()])
-        .output()
-        .await;
-    });
-
     Self {
       browser: browser,
-      process_id: process_id,
       request_patterns: vec![video_pattern],
     }
   }
@@ -126,6 +122,9 @@ impl Downloader {
   }
 
   pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
+    info!("Recieved download call for {url}");
+
+    info!("Validating url");
     validate_url(url)?;
 
     let target = CreateTarget {
@@ -154,6 +153,7 @@ impl Downloader {
       tokio::time::sleep(Duration::from_millis(100)).await;
       timeout -= 0.1;
     }
+
     let _ = tab.close(false);
 
     let master_playlist_url = intercepted_result.lock().unwrap().to_owned();
@@ -165,6 +165,7 @@ impl Downloader {
     let video_name = format!("video_{}_{}", id, output_name);
     let audio_name = format!("audio_{}_{}", id, output_name);
 
+    info!("Started downloading video and audio segments");
     let segments = download_segments(media_urls.clone()).await?;
 
     tokio::fs::write(video_name.clone(), segments.0)
@@ -174,6 +175,7 @@ impl Downloader {
       .await
       .map_err(|_| DownloaderError::IOError)?;
 
+    info!("Downloaded segments, executing ffmpeg command");
     Command::new("ffmpeg")
       .args(&["-i", &video_name])
       .args(&["-i", &audio_name])
@@ -187,6 +189,7 @@ impl Downloader {
     tokio::fs::remove_file(video_name).await.map_err(|_| DownloaderError::IOError)?;
     tokio::fs::remove_file(audio_name).await.map_err(|_| DownloaderError::IOError)?;
 
+    info!("Downloaded video successfully");
     Ok(output_name)
   }
 }
