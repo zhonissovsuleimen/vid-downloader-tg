@@ -46,11 +46,14 @@ async fn send_platforms(bot: Bot, msg: Message) -> ResponseResult<()> {
 async fn send_video(bot: Bot, msg: Message) -> ResponseResult<()> {
   let downloader = Downloader::new();
   match downloader.download(msg.text().unwrap()).await {
-    Ok(path) => bot.send_video(msg.chat.id, InputFile::file(path)).await?,
+    Ok(path) => {
+      bot.send_video(msg.chat.id, InputFile::file(path.clone())).await?;
+      tokio::fs::remove_file(path).await?;
+      },
     Err(e) => {
       bot
         .send_message(msg.chat.id, format!("Failed to download video ({})", e.to_string()))
-        .await?
+        .await?;
     }
   };
   Ok(())
