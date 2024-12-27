@@ -4,7 +4,7 @@ pub enum DownloaderError {
   InvalidInputError,
   UnsupportedPlatformError,
   FetchError,
-  MediaPlaylistExtractError,
+  NoMasterPlaylistError,
   IOError,
   FfmpegError,
   OtherError(String),
@@ -18,14 +18,15 @@ impl From<anyhow::Error> for DownloaderError {
 
 impl Display for DownloaderError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    use DownloaderError::*;
     match self {
-      DownloaderError::InvalidInputError => write!(f, "Invalid input"),
-      DownloaderError::UnsupportedPlatformError => write!(f, "Platform not supported"),
-      DownloaderError::FetchError => write!(f, "Failed to fetch data from external source"),
-      DownloaderError::MediaPlaylistExtractError => write!(f, "Failed to extract media playlist"),
-      DownloaderError::IOError => write!(f, "Failed to perform IO operation"),
-      DownloaderError::FfmpegError => write!(f, "Failed to execute ffmpeg command"),
-      DownloaderError::OtherError(e) => write!(f, "Error: {}", e),
+      InvalidInputError => write!(f, "Invalid input"),
+      UnsupportedPlatformError => write!(f, "Platform not supported"),
+      FetchError => write!(f, "Failed to fetch data from external source"),
+      NoMasterPlaylistError => write!(f, "No master playlist found"),
+      IOError => write!(f, "Failed to perform IO operation"),
+      FfmpegError => write!(f, "Failed to execute ffmpeg command"),
+      OtherError(e) => write!(f, "Error: {}", e),
     }
   }
 }
