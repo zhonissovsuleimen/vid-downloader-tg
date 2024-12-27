@@ -16,7 +16,7 @@ use std::{
 };
 use tracing::info;
 
-use super::{downloader_error::DownloaderError, playlist::variant_playlist};
+use super::{downloader_error::DownloaderError, playlist::variant_playlist::{self, VariantPlaylist}};
 
 enum Platform {
   Twitter,
@@ -25,8 +25,8 @@ enum Platform {
 
 pub struct Downloader {
   browser: Arc<Browser>,
-
   request_patterns: Vec<RequestPattern>,
+  pub variant_playlist: Option<VariantPlaylist>,
 }
 
 impl Downloader {
@@ -92,7 +92,7 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    Self { browser: browser, request_patterns: vec![video_pattern] }
+    Self { browser: browser, request_patterns: vec![video_pattern], variant_playlist: None }
   }
 
   fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -113,7 +113,7 @@ impl Downloader {
     })
   }
 
-  pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
+  pub async fn download(&mut self, url: &str) -> Result<(), DownloaderError> {
     info!("Recieved download call for {url}");
 
     info!("Validating url");
@@ -150,12 +150,8 @@ impl Downloader {
 
     let variant_playlist_url = intercepted_result.lock().unwrap().to_owned();
     let variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
-
-    if variant_playlist.master_playlists.is_empty() {
-      return Err(DownloaderError::NoMasterPlaylistError);
-    }
-
-    variant_playlist.master_playlists[0].write().await
+    self.variant_playlist = Some(variant_playlist);
+    Ok(())
   }
 }
 
