@@ -16,7 +16,8 @@ use std::{
 };
 use tracing::info;
 
-use super::{downloader_error::DownloaderError, playlist::variant_playlist::{self, VariantPlaylist}};
+use super::{downloader_error::DownloaderError, playlist::variant_playlist::VariantPlaylist};
+
 
 enum Platform {
   Twitter,
@@ -26,7 +27,6 @@ enum Platform {
 pub struct Downloader {
   browser: Arc<Browser>,
   request_patterns: Vec<RequestPattern>,
-  pub variant_playlist: Option<VariantPlaylist>,
 }
 
 impl Downloader {
@@ -92,7 +92,7 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    Self { browser: browser, request_patterns: vec![video_pattern], variant_playlist: None }
+    Self { browser: browser, request_patterns: vec![video_pattern] }
   }
 
   fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -113,10 +113,9 @@ impl Downloader {
     })
   }
 
-  pub async fn download(&mut self, url: &str) -> Result<(), DownloaderError> {
-    info!("Recieved download call for {url}");
+  pub async fn get_variant_playlist(&self, url: &str) -> Result<VariantPlaylist, DownloaderError> {
+    info!("Recieved download call: {url}");
 
-    info!("Validating url");
     validate_url(url)?;
 
     let target = CreateTarget {
@@ -149,13 +148,12 @@ impl Downloader {
     let _ = tab.close(false);
 
     let variant_playlist_url = intercepted_result.lock().unwrap().to_owned();
-    let variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
-    self.variant_playlist = Some(variant_playlist);
-    Ok(())
+    VariantPlaylist::from_url(&variant_playlist_url).await
   }
 }
 
 fn validate_url(url: &str) -> Result<(), DownloaderError> {
+  info!("Validating url: {url}");
   if url.is_empty() || !url.starts_with("https://") {
     return Err(DownloaderError::InvalidInputError);
   }
@@ -166,5 +164,6 @@ fn validate_url(url: &str) -> Result<(), DownloaderError> {
     return Err(DownloaderError::UnsupportedPlatformError);
   }
 
+  info!("Url validated: {url}");
   Ok(())
 }
