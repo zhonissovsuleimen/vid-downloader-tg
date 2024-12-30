@@ -9,7 +9,10 @@ use downloader::{playlist::variant_playlist::VariantPlaylist, Downloader};
 use teloxide::{
   dispatching::dialogue::GetChatId,
   prelude::*,
-  types::{InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MediaKind::*, MessageEntityKind::*, MessageId, MessageKind::*},
+  types::{
+    InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InputMedia, InputMediaVideo, MediaKind::*, MessageEntityKind::*, MessageId,
+    MessageKind::*,
+  },
   RequestError,
 };
 use tracing::info;
@@ -59,9 +62,9 @@ async fn message_handler(bot: Bot, msg: Message, state: Arc<Mutex<State>>) -> Re
         let is_link = media_text.entities.iter().any(|e| e.kind == Url);
 
         match media_text.text.as_str() {
-          url if is_link => send_video(bot, msg.chat.id, msg.id, url, state).await?,
-          "/platforms" if is_command => send_platforms(bot, msg.chat.id).await?,
-          _ => send_help(bot, msg.chat.id).await?,
+          url if is_link => handle_download_request(bot, msg.chat.id, msg.id, url, state).await?,
+          "/platforms" if is_command => handle_platforms_command(bot, msg.chat.id).await?,
+          _ => handle_help_command(bot, msg.chat.id).await?,
         }
         info!("Handled user message");
       }
@@ -72,7 +75,7 @@ async fn message_handler(bot: Bot, msg: Message, state: Arc<Mutex<State>>) -> Re
   Ok(())
 }
 
-async fn send_help(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
+async fn handle_help_command(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
   const HELP: &str = "To download a video, send the video URL to me. I will download the video and send it back to you.\n\n\
     Commands:\n\
     /help - Show this message\n\
@@ -82,7 +85,7 @@ async fn send_help(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
   Ok(())
 }
 
-async fn send_platforms(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
+async fn handle_platforms_command(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
   const PLATFORMS: &str = "\
   Twitter / X [Videos]\
   ";
@@ -90,8 +93,16 @@ async fn send_platforms(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
   Ok(())
 }
 
-async fn send_video(bot: Bot, chat_id: ChatId, msg_id: MessageId, url: &str, state: Arc<Mutex<State>>) -> ResponseResult<()> {
+async fn handle_download_request(
+  bot: Bot,
+  chat_id: ChatId,
+  msg_id: MessageId,
+  url: &str,
+  state: Arc<Mutex<State>>,
+) -> ResponseResult<()> {
   let mut state_guard = state.lock().await;
+  let initial_msg = bot.send_message(chat_id, "Parsing twitter...").await?;
+  let initial_msg_id = initial_msg.id;
 
   match state_guard.downloader.get_variant_playlist(url).await {
     Ok(variant_playlist) => {
@@ -102,22 +113,25 @@ async fn send_video(bot: Bot, chat_id: ChatId, msg_id: MessageId, url: &str, sta
       }
 
       state_guard.variants.insert((chat_id, msg_id), variant_playlist);
-      bot.send_message(chat_id, "Select a resolution to download").reply_markup(InlineKeyboardMarkup::new(keyboard)).await?;
+      bot
+        .edit_message_text(chat_id, initial_msg_id, "Select a resolution to download")
+        .reply_markup(InlineKeyboardMarkup::new(keyboard))
+        .await?;
     }
     Err(e) => {
-      bot.send_message(chat_id, format!("Failed to download video ({})", e.to_string())).await?;
+      bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
     }
   };
   Ok(())
 }
 
 async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<Mutex<State>>) -> ResponseResult<()> {
-  let prev_msg_id = &query.message.as_ref().unwrap().id();
+  let initial_msg_id = &query.message.as_ref().unwrap().id();
   let chat_id = query.chat_id().unwrap();
 
   if let Some(ref callback_data) = query.data {
+    bot.edit_message_text(chat_id, *initial_msg_id, "Downloading video...").await?;
     bot.answer_callback_query(&query.id).await?;
-    bot.delete_message(chat_id, *prev_msg_id).await?;
 
     let (msg_id, resolution_index) = callback_data.split_once(' ').unwrap();
     let msg_id = MessageId(msg_id.parse::<i32>().unwrap());
@@ -131,7 +145,10 @@ async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<Mutex
       .download()
       .await
       .map_err(|e| RequestError::from(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-    bot.send_video(chat_id, InputFile::file(&path)).await?;
+
+    bot.edit_message_text(chat_id, *initial_msg_id, "Uploading video...").await?;
+    let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
+    bot.edit_message_media(chat_id, *initial_msg_id, input_media).await?;
 
     variants.remove(&(chat_id, msg_id));
     tokio::fs::remove_file(&path).await?;
