@@ -112,19 +112,15 @@ async fn handle_download_request(
 
   match url {
     _ if TwitterDownloader::validate_url(url).is_ok() => {
-      info!("Downloading video from Twitter");
       match TwitterDownloader::get_variant_playlist(&state_guard.downloader.browser, url).await {
         Ok(variant_playlist) => {
-          info!("Found variant playlist");
           let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
           for (i, playlist) in variant_playlist.master_playlists.iter().enumerate() {
             let key = format!("{msg_id} {i}");
-            info!("Adding resolution: {}", playlist.resolution);
             keyboard.push(vec![InlineKeyboardButton::callback(&playlist.resolution, key)]);
           }
 
           state_guard.variants.insert((chat_id, msg_id), variant_playlist);
-          info!("Sending message with resolutions");
           bot
             .edit_message_text(chat_id, initial_msg_id, "Select a resolution to download")
             .reply_markup(InlineKeyboardMarkup::new(keyboard))
@@ -152,7 +148,6 @@ async fn handle_download_request(
 }
 
 async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<Mutex<State>>) -> ResponseResult<()> {
-  info!("Handling callback query");
   let initial_msg_id = &query.message.as_ref().unwrap().id();
   let chat_id = query.chat_id().unwrap();
 
