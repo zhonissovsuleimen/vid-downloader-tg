@@ -131,16 +131,20 @@ async fn handle_download_request(
         }
       };
     }
-    _ if TiktokDownloader::validate_url(url).is_ok() => match TiktokDownloader::download(&state_guard.downloader.browser, url).await {
-      Ok(path) => {
-        let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
-        bot.edit_message_media(chat_id, initial_msg_id, input_media).await?;
-        tokio::fs::remove_file(&path).await?;
+    _ if TiktokDownloader::validate_url(url).is_ok() => {
+      bot.edit_message_text(chat_id, initial_msg_id, "Downloading video...").await?;
+      match TiktokDownloader::download(&state_guard.downloader.browser, url).await {
+        Ok(path) => {
+          bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await?;
+          let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
+          bot.edit_message_media(chat_id, initial_msg_id, input_media).await?;
+          tokio::fs::remove_file(&path).await?;
+        }
+        Err(e) => {
+          bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
+        }
       }
-      Err(e) => {
-        bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
-      }
-    },
+    } 
     _ => {}
   }
 
