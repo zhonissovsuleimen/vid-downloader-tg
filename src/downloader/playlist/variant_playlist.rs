@@ -1,7 +1,6 @@
 use futures::future::join_all;
 use regex::Regex;
 use std::collections::HashMap;
-use tracing::info;
 
 use super::master_playlist::MasterPlaylist;
 use crate::downloader::downloader_error::DownloaderError;
@@ -12,7 +11,6 @@ pub struct VariantPlaylist {
 
 impl VariantPlaylist {
   pub async fn from_url(url: &str) -> Result<Self, DownloaderError> {
-    info!("Fetching variant playlist from: {url}");
     const BASE_URL: &str = "https://video.twimg.com";
     struct ParsedOutput {
       video_url: Option<String>,

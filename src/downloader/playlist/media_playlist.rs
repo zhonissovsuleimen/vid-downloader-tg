@@ -1,6 +1,5 @@
 use regex::Regex;
 use std::sync::{Arc, Mutex};
-use tracing::info;
 
 use crate::downloader::downloader_error::DownloaderError;
 
@@ -11,7 +10,6 @@ pub struct MediaPlaylist {
 
 impl MediaPlaylist {
   pub async fn from_url(url: &str) -> Result<Self, DownloaderError> {
-    info!("Fetching media playlist from: {}", url);
     let mut name = String::new();
     const BASE_URL: &str = "https://video.twimg.com";
 

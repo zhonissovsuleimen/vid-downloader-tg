@@ -5,7 +5,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // mod bot_wrapper;
-use downloader::{playlist::variant_playlist::VariantPlaylist, Downloader};
+use downloader::{
+  downloader::PlatformDownloader,
+  platforms::{tiktok::TiktokDownloader, twitter::TwitterDownloader},
+  playlist::variant_playlist::VariantPlaylist,
+  Downloader,
+};
 use teloxide::{
   dispatching::dialogue::GetChatId,
   prelude::*,
@@ -88,6 +93,7 @@ async fn handle_help_command(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn handle_platforms_command(bot: Bot, chat_id: ChatId) -> ResponseResult<()> {
   const PLATFORMS: &str = "\
   Twitter / X [Videos]\
+  TikTok [Videos]\
   ";
   bot.send_message(chat_id, PLATFORMS).await?;
   Ok(())
@@ -101,31 +107,52 @@ async fn handle_download_request(
   state: Arc<Mutex<State>>,
 ) -> ResponseResult<()> {
   let mut state_guard = state.lock().await;
-  let initial_msg = bot.send_message(chat_id, "Parsing twitter...").await?;
+  let initial_msg = bot.send_message(chat_id, "Parsing link...").await?;
   let initial_msg_id = initial_msg.id;
 
-  match state_guard.downloader.get_variant_playlist(url).await {
-    Ok(variant_playlist) => {
-      let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
-      for (i, playlist) in variant_playlist.master_playlists.iter().enumerate() {
-        let key = format!("{msg_id} {i}");
-        keyboard.push(vec![InlineKeyboardButton::callback(&playlist.resolution, key)]);
-      }
+  match url {
+    _ if TwitterDownloader::validate_url(url).is_ok() => {
+      info!("Downloading video from Twitter");
+      match TwitterDownloader::get_variant_playlist(&state_guard.downloader.browser, url).await {
+        Ok(variant_playlist) => {
+          info!("Found variant playlist");
+          let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
+          for (i, playlist) in variant_playlist.master_playlists.iter().enumerate() {
+            let key = format!("{msg_id} {i}");
+            info!("Adding resolution: {}", playlist.resolution);
+            keyboard.push(vec![InlineKeyboardButton::callback(&playlist.resolution, key)]);
+          }
 
-      state_guard.variants.insert((chat_id, msg_id), variant_playlist);
-      bot
-        .edit_message_text(chat_id, initial_msg_id, "Select a resolution to download")
-        .reply_markup(InlineKeyboardMarkup::new(keyboard))
-        .await?;
+          state_guard.variants.insert((chat_id, msg_id), variant_playlist);
+          info!("Sending message with resolutions");
+          bot
+            .edit_message_text(chat_id, initial_msg_id, "Select a resolution to download")
+            .reply_markup(InlineKeyboardMarkup::new(keyboard))
+            .await?;
+        }
+        Err(e) => {
+          bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
+        }
+      };
     }
-    Err(e) => {
-      bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
-    }
-  };
+    _ if TiktokDownloader::validate_url(url).is_ok() => match TiktokDownloader::download(&state_guard.downloader.browser, url).await {
+      Ok(path) => {
+        let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
+        bot.edit_message_media(chat_id, initial_msg_id, input_media).await?;
+        tokio::fs::remove_file(&path).await?;
+      }
+      Err(e) => {
+        bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
+      }
+    },
+    _ => {}
+  }
+
   Ok(())
 }
 
 async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<Mutex<State>>) -> ResponseResult<()> {
+  info!("Handling callback query");
   let initial_msg_id = &query.message.as_ref().unwrap().id();
   let chat_id = query.chat_id().unwrap();
 
