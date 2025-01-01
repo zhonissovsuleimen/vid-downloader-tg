@@ -2,9 +2,8 @@ mod downloader;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
-// mod bot_wrapper;
 use downloader::{
   downloader::PlatformDownloader,
   platforms::{tiktok::TiktokDownloader, twitter::TwitterDownloader},
@@ -52,14 +51,15 @@ async fn main() {
     .branch(Update::filter_callback_query().endpoint(callback_query_handler));
 
   Dispatcher::builder(bot, handler)
-    .dependencies(dptree::deps![Arc::new(Mutex::new(state))])
+    .dependencies(dptree::deps![Arc::new(RwLock::new(state))])
+    .distribution_function(|_| None::<()>)
     .enable_ctrlc_handler()
     .build()
     .dispatch()
     .await;
 }
 
-async fn message_handler(bot: Bot, msg: Message, state: Arc<Mutex<State>>) -> ResponseResult<()> {
+async fn message_handler(bot: Bot, msg: Message, state: Arc<RwLock<State>>) -> ResponseResult<()> {
   match &msg.kind {
     Common(message_common) => match &message_common.media_kind {
       Text(media_text) => {
@@ -104,15 +104,19 @@ async fn handle_download_request(
   chat_id: ChatId,
   msg_id: MessageId,
   url: &str,
-  state: Arc<Mutex<State>>,
+  state: Arc<RwLock<State>>,
 ) -> ResponseResult<()> {
-  let mut state_guard = state.lock().await;
   let initial_msg = bot.send_message(chat_id, "Parsing link...").await?;
   let initial_msg_id = initial_msg.id;
 
   match url {
     _ if TwitterDownloader::validate_url(url).is_ok() => {
-      match TwitterDownloader::get_variant_playlist(&state_guard.downloader.browser, url).await {
+      let result = {
+        let read_guard = state.read().await;
+        TwitterDownloader::get_variant_playlist(&read_guard.downloader.browser, url).await
+      };
+
+      match result {
         Ok(variant_playlist) => {
           let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
           for (i, playlist) in variant_playlist.master_playlists.iter().enumerate() {
@@ -120,11 +124,12 @@ async fn handle_download_request(
             keyboard.push(vec![InlineKeyboardButton::callback(&playlist.resolution, key)]);
           }
 
-          state_guard.variants.insert((chat_id, msg_id), variant_playlist);
           bot
             .edit_message_text(chat_id, initial_msg_id, "Select a resolution to download")
             .reply_markup(InlineKeyboardMarkup::new(keyboard))
             .await?;
+          let mut write_guard = state.write().await;
+          write_guard.variants.insert((chat_id, msg_id), variant_playlist);
         }
         Err(e) => {
           bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
@@ -133,51 +138,69 @@ async fn handle_download_request(
     }
     _ if TiktokDownloader::validate_url(url).is_ok() => {
       bot.edit_message_text(chat_id, initial_msg_id, "Downloading video...").await?;
-      match TiktokDownloader::download(&state_guard.downloader.browser, url).await {
+      let result = {
+        let read_guard = state.read().await;
+        TiktokDownloader::download(&read_guard.downloader.browser, url).await
+      };
+
+      match result {
         Ok(path) => {
-          bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await?;
-          let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
-          bot.edit_message_media(chat_id, initial_msg_id, input_media).await?;
-          tokio::fs::remove_file(&path).await?;
+          let _ = tokio::spawn(async move {
+            let _ = bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await;
+            let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
+            let _ = bot.edit_message_media(chat_id, initial_msg_id, input_media).await;
+            let _ = tokio::fs::remove_file(&path).await;
+          })
+          .await;
         }
         Err(e) => {
           bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
         }
       }
-    } 
+    }
     _ => {}
   }
 
   Ok(())
 }
 
-async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<Mutex<State>>) -> ResponseResult<()> {
-  let initial_msg_id = &query.message.as_ref().unwrap().id();
+async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<RwLock<State>>) -> ResponseResult<()> {
+  let initial_msg_id = query.message.as_ref().unwrap().id();
   let chat_id = query.chat_id().unwrap();
 
-  if let Some(ref callback_data) = query.data {
-    bot.edit_message_text(chat_id, *initial_msg_id, "Downloading video...").await?;
+  if let Some(callback_data) = query.data {
     bot.answer_callback_query(&query.id).await?;
+    tokio::spawn(async move {
+      let _ = bot.edit_message_text(chat_id, initial_msg_id, "Downloading video...").await;
 
-    let (msg_id, resolution_index) = callback_data.split_once(' ').unwrap();
-    let msg_id = MessageId(msg_id.parse::<i32>().unwrap());
-    let resolution_index = resolution_index.parse::<usize>().unwrap();
+      let (msg_id, resolution_index) = callback_data.split_once(' ').unwrap();
+      let msg_id = MessageId(msg_id.parse::<i32>().unwrap());
+      let resolution_index = resolution_index.parse::<usize>().unwrap();
 
-    let variants = &mut state.lock().await.variants;
-    let variant_playlist = variants.get_mut(&(chat_id, msg_id)).unwrap();
-    let master_playlist = &mut variant_playlist.master_playlists[resolution_index];
+      let path = {
+        let mut write_guard = state.write().await;
+        let variants = &mut write_guard.variants;
+        let variant_playlist = variants.get_mut(&(chat_id, msg_id)).unwrap();
+        let master_playlist = &mut variant_playlist.master_playlists[resolution_index];
 
-    let path = master_playlist
-      .download()
-      .await
-      .map_err(|e| RequestError::from(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        master_playlist.download().await.map_err(|e| RequestError::from(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+      };
 
-    bot.edit_message_text(chat_id, *initial_msg_id, "Uploading video...").await?;
-    let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
-    bot.edit_message_media(chat_id, *initial_msg_id, input_media).await?;
+      match path {
+        Ok(path) => {
+          let _ = bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await;
+          let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
+          let _ = bot.edit_message_media(chat_id, initial_msg_id, input_media).await;
+          let _ = tokio::fs::remove_file(&path).await;
+        }
+        Err(e) => {
+          let _ = bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await;
+        }
+      }
 
-    variants.remove(&(chat_id, msg_id));
-    tokio::fs::remove_file(&path).await?;
+      let mut write_guard = state.write().await;
+      write_guard.variants.remove(&(chat_id, msg_id));
+    });
   }
 
   Ok(())
