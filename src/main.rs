@@ -1,30 +1,30 @@
 mod downloader;
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::RwLock;
 
 use downloader::{
   downloader::PlatformDownloader,
   platforms::{tiktok::TiktokDownloader, twitter::TwitterDownloader},
   playlist::variant_playlist::VariantPlaylist,
-  Downloader,
+  Downloader
 };
 use teloxide::{
   dispatching::dialogue::GetChatId,
   prelude::*,
   types::{
     InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InputMedia, InputMediaVideo, MediaKind::*, MessageEntityKind::*, MessageId,
-    MessageKind::*,
+    MessageKind::*
   },
-  RequestError,
+  RequestError
 };
 use tracing::info;
 use tracing_subscriber::{self, fmt::format::FmtSpan};
 
 struct State {
   downloader: Downloader,
-  variants: HashMap<(ChatId, MessageId), VariantPlaylist>,
+  variants: HashMap<(ChatId, MessageId), VariantPlaylist>
 }
 
 #[tokio::main]
@@ -42,7 +42,9 @@ async fn main() {
     .init();
 
   info!("Starting telegram bot...");
-  let bot = Bot::from_env();
+
+  let client = reqwest::Client::builder().timeout(Duration::from_secs(60 * 60)).build().unwrap();
+  let bot = Bot::from_env_with_client(client);
 
   let state = State { downloader: Downloader::new(), variants: HashMap::new() };
 
@@ -69,7 +71,7 @@ async fn message_handler(bot: Bot, msg: Message, state: Arc<RwLock<State>>) -> R
         match media_text.text.as_str() {
           url if is_link => handle_download_request(bot, msg.chat.id, msg.id, url, state).await?,
           "/platforms" if is_command => handle_platforms_command(bot, msg.chat.id).await?,
-          _ => handle_help_command(bot, msg.chat.id).await?,
+          _ => handle_help_command(bot, msg.chat.id).await?
         }
         info!("Handled user message");
       }
@@ -104,7 +106,7 @@ async fn handle_download_request(
   chat_id: ChatId,
   msg_id: MessageId,
   url: &str,
-  state: Arc<RwLock<State>>,
+  state: Arc<RwLock<State>>
 ) -> ResponseResult<()> {
   let initial_msg = bot.send_message(chat_id, "Parsing link...").await?;
   let initial_msg_id = initial_msg.id;
@@ -148,7 +150,12 @@ async fn handle_download_request(
           let _ = tokio::spawn(async move {
             let _ = bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await;
             let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
-            let _ = bot.edit_message_media(chat_id, initial_msg_id, input_media).await;
+            match bot.edit_message_media(chat_id, initial_msg_id, input_media).await {
+              Ok(_) => {}
+              Err(e) => {
+                let _ = bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to upload video: {e}")).await;
+              }
+            }
             let _ = tokio::fs::remove_file(&path).await;
           })
           .await;
@@ -190,7 +197,12 @@ async fn callback_query_handler(bot: Bot, query: CallbackQuery, state: Arc<RwLoc
         Ok(path) => {
           let _ = bot.edit_message_text(chat_id, initial_msg_id, "Uploading video...").await;
           let input_media = InputMedia::Video(InputMediaVideo::new(InputFile::file(&path)));
-          let _ = bot.edit_message_media(chat_id, initial_msg_id, input_media).await;
+          match bot.edit_message_media(chat_id, initial_msg_id, input_media).await {
+            Ok(_) => {}
+            Err(e) => {
+              let _ = bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to upload video: {e}")).await;
+            }
+          }
           let _ = tokio::fs::remove_file(&path).await;
         }
         Err(e) => {
