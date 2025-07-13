@@ -60,7 +60,7 @@ impl PlatformDownloader for TiktokDownloader {
 
     let bytes = response.bytes().await.map_err(|_| DownloaderError::FetchError)?;
 
-    let mut output_name = url.split('/').last().unwrap().to_string();
+    let mut output_name = url.split('/').filter(|s| !s.is_empty()).last().unwrap_or("video").to_string();
     if output_name.contains('?') {
       output_name = output_name.split('?').next().unwrap().to_string();
     }
@@ -111,7 +111,7 @@ fn get_interceptor(url: Arc<Mutex<String>>, cookie: Arc<Mutex<String>>) -> Arc<d
 fn get_request_pattern() -> RequestPattern {
   RequestPattern {
     url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
-    resource_Type: Some(ResourceType::Media),
+    resource_Type: Some(ResourceType::Xhr),
     request_stage: Some(RequestStage::Request),
   }
 }
