@@ -119,7 +119,7 @@ async fn handle_download_request(
       };
 
       match result {
-        Ok(variant_playlist) => {
+        Ok(variant_playlist) if !variant_playlist.master_playlists.is_empty() => {
           let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
           for (i, playlist) in variant_playlist.master_playlists.iter().enumerate() {
             let key = format!("{msg_id} {i}");
@@ -135,6 +135,9 @@ async fn handle_download_request(
         }
         Err(e) => {
           bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video: {e}")).await?;
+        }
+        _ => {
+          bot.edit_message_text(chat_id, initial_msg_id, format!("Failed to download video")).await?;
         }
       };
     }
