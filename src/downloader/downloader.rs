@@ -1,6 +1,5 @@
 use headless_chrome::{Browser, LaunchOptions};
-use std::{sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use std::time::Duration;
 
 use super::{downloader_error::DownloaderError, playlist::variant_playlist::VariantPlaylist};
 

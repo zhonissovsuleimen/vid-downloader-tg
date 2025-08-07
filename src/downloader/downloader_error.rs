@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 pub enum DownloaderError {
-  InvalidInputError,
+  _InvalidInputError,
   UnsupportedPlatformError,
   FetchError,
   NoMasterPlaylistError,
@@ -20,7 +20,7 @@ impl Display for DownloaderError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     use DownloaderError::*;
     match self {
-      InvalidInputError => write!(f, "Invalid input"),
+      _InvalidInputError => write!(f, "Invalid input"),
       UnsupportedPlatformError => write!(f, "Platform not supported"),
       FetchError => write!(f, "Failed to fetch data from external source"),
       NoMasterPlaylistError => write!(f, "No master playlist found"),
