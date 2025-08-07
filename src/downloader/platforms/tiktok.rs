@@ -28,7 +28,7 @@ impl PlatformDownloader for TiktokDownloader {
     let intercepted_cookie = Arc::new(Mutex::new(String::new()));
     let interceptor = get_interceptor(intercepted_url.clone(), intercepted_cookie.clone());
 
-    tab.enable_fetch(Some(&vec![get_request_pattern()]), None)?;
+    tab.enable_fetch(Some(&get_request_patterns()), None)?;
     tab.enable_request_interception(interceptor)?;
     tab.navigate_to(url)?;
 
@@ -108,12 +108,19 @@ fn get_interceptor(url: Arc<Mutex<String>>, cookie: Arc<Mutex<String>>) -> Arc<d
   })
 }
 
-fn get_request_pattern() -> RequestPattern {
-  RequestPattern {
+fn get_request_patterns() -> Vec<RequestPattern> {
+  vec![
+    RequestPattern {
     url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
     resource_Type: Some(ResourceType::Xhr),
     request_stage: Some(RequestStage::Request),
-  }
+    },
+    RequestPattern {
+    url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
+    resource_Type: Some(ResourceType::Media),
+    request_stage: Some(RequestStage::Request),
+    },
+  ]
 }
 
 fn get_initial_tab_create_target() -> CreateTarget {
