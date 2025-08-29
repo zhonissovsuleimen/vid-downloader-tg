@@ -26,7 +26,8 @@ impl MasterPlaylist {
     let video_bytes = video_media_playlist.get_byte_data();
 
     let video_name = video_media_playlist.name.split('/').last().unwrap().split('.').next().unwrap().to_string();
-    let output_name = format!("{}_{}.mp4", video_name, self.resolution);
+    // let output_name = format!("{}_{}.mp4", video_name, self.resolution);
+    let output_name = String::from("output.mp4");
 
     tokio::fs::write(video_name.clone(), video_bytes).await.map_err(|_| DownloaderError::IOError)?;
 
